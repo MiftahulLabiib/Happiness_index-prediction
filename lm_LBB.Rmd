@@ -1,0 +1,315 @@
+---
+title: "Happiness Index Score Prediction Using Linear Regression"
+author: "Miftahul Labiib Syam"
+date: "2023-06-10"
+output: 
+  html_document:
+    number_sections: true
+    df_print: paged
+    highlight: zenburn
+    theme: flatly
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Intro
+
+World Happiness Report adalah survei penting mengenai keadaan kebahagiaan global. Laporan pertama diterbitkan pada tahun 2012, yang kedua pada tahun 2013, yang ketiga pada tahun 2015, dan yang keempat pada Pembaruan 2016. Laporan Kebahagiaan Dunia 2017, yang menilai 155 negara berdasarkan tingkat kebahagiaan mereka, dirilis di Perserikatan Bangsa-Bangsa dalam acara peringatan Hari Internasional Kebahagiaan pada tanggal 20 Maret. Laporan ini terus mendapatkan pengakuan global karena pemerintah, organisasi, dan masyarakat sipil semakin menggunakan indikator kebahagiaan untuk menginformasikan keputusan pembuatan kebijakan mereka. Para ahli terkemuka di berbagai bidang - ekonomi, psikologi, analisis survei, statistik nasional, kesehatan, kebijakan publik, dan lain-lain - menjelaskan bagaimana pengukuran kesejahteraan dapat digunakan secara efektif untuk menilai kemajuan suatu negara. Laporan-laporan ini meninjau keadaan kebahagiaan di dunia saat ini dan menunjukkan bagaimana ilmu kebahagiaan yang baru menjelaskan variasi kebahagiaan secara pribadi dan nasional.
+
+## Project's Goal
+
+Dalam projek ini, data yang digunakan adalah laporan index kebahagiaan pada tahun 2019 pada 154 negara di dunia. Projek ini bertujuan untuk melihat seberapa besar GDP, Social Support, Angka Harapan hidup, freedon of choices, generocity, dan persepsi terhadap korupsi berpengaruh terhadap index kebahagiaan di suatu negara. Oleh karena itu, metode yang digunakan dalam projek ini adalah metode linear regression untuk menilai korelasi hubungan antar beberapa variabel prediktor terhadap variabel target. 
+
+# Data Preparation
+
+```{r message= FALSE, warning=FALSE}
+#Import library
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(MLmetrics)
+```
+```{r}
+#read data
+happiness <- read.csv("2019.csv")
+head(happiness)
+```
+**Deskripsi Kolom**:
+
+- `GDP.per.capita (GDP per capita)`: Kolom ini mencerminkan nilai-nilai PDB (Produk Domestik Bruto) per kapita di berbagai negara.
+- `Social.support (Dukungan sosial)`: Kolom ini menggambarkan tingkat dukungan sosial yang diterima oleh individu dalam suatu negara.
+- `Healthy.life.expectancy (Harapan hidup sehat)`: Kolom ini mencerminkan harapan hidup sehat di suatu negara.
+- `Freedom.to.make.life.choices (Kebebasan dalam membuat pilihan hidup)`: Kolom ini mencerminkan tingkat kebebasan yang dimiliki oleh individu dalam membuat keputusan hidup mereka.
+- `Generosity (Kegenerosan)`: Kolom ini mencerminkan tingkat kebaikan hati dan kecenderungan untuk memberi individu dalam suatu negara.
+- `Perceptions.of.corruption (Persepsi tentang korupsi)`: Kolom ini mencerminkan persepsi individu tentang tingkat korupsi di suatu negara.
+
+```{r}
+#Check datatypes
+glimpse(happiness)
+```
+Nampaknya semua data telah tersimpan ke dalam tipe yang sudah tepat. Namun, karena kita ingin melakukan prediksi terhadap `Score` sehingga kolom `Country.or.region` dan `Overall.rank` akan dihapus karena tidak akan dimasukkan sebagai variabel prediktor dalam analisis ini.
+
+```{r}
+#Select data
+happiness_data <- happiness %>% 
+  select(-Overall.rank, -Country.or.region)
+head(happiness_data)
+```
+Langkah selanjutnya adalah mengecek apakah terdapat kolom yang memiliki nilai `NULL` sehingga kita bisa menentukan tindakan yang akan dilakukan jika hal sedemikin terdapat pada data yang kita miliki.
+
+```{r}
+#Check if there is NULL columns
+colSums(is.na(happiness_data))
+```
+Tidak ada data yang `NULL` sehingga kita bisa melanjutkan ke tahap selanjutnya yaitu *Exploratory Data Analysis (EDA)*.
+
+# Exploratory Data Analysis (EDA)
+
+Cek Persebaran data dengan menggunakan fungsi `boxplot()`:
+
+```{r}
+#Check data distrbution
+boxplot(happiness_data)
+```
+
+Meskipun terdapat beberapa outlier pada data diatas, namun jumlahnya sangat kecil sehingga kita bisa mengabaikannya dan lanjut melakukan pengecekan pada korelasi antara variabel prediktor dengan variabel target menggunakan fungsi `ggcorr()` dari library `GGALLY`:
+
+```{r message= FALSE, warning=FALSE}
+library(GGally)
+ggcorr(happiness_data, label = T, label_size = 2.9, hjust = 1, layout.exp = 2)
+```
+
+Dari hasil visualisasi diatas, kita bisa mengasumsikan bahwa variable prediktor yang memiliki korelasi yang kuat dengan variabel target adalah variabel dengan nilai korelasi >0.05, sehingga dapat diambil beberapa variabel, yaitu `GDP per Kapita`, `Social Support`, `Angka harapan hidup`, dan `Freedom to make choices`.
+
+# Train-test split
+
+Sebelum kita membuat model, kita perlu membagi data menjadi *Data Train* dan *Data Test*. Kita akan menggunakan *Data Train* untuk melatih model regresi linear. *Data Test* akan digunakan sebagai pembanding dan melihat apakah model terlalu overfit dan tidak dapat memprediksi data baru yang belum pernah dilihat selama fase pelatihan. Kita akan menggunakan 80% dari **happiness_data** sebagai *Data Train* dan sisanya sebagai *Data Test*.
+
+```{r}
+set.seed(123)
+#splitting data
+index <- sample(x = nrow(happiness_data),
+                size = nrow(happiness_data)*0.8)
+happiness_train <- happiness_data[index, ]
+happiness_test <- happiness_data[-index, ]
+```
+
+# Model Fitting and Future Selection
+
+Sekarang kita akan membuat sebuah model regresi dengan variabel target adalah `Score`:
+
+## Model dengan semua prediktor
+
+```{r}
+#Building model with all predictor variable
+happiness_all <- lm(formula = Score ~.,
+                    data = happiness_train)
+summary(happiness_all)
+```
+
+## Model dengan beberapa prediktor (Selection)
+
+```{r}
+#Building model with Predictors based on correlation
+
+happiness_selection <- lm(formula = Score ~ GDP.per.capita + Social.support + Healthy.life.expectancy + Freedom.to.make.life.choices,
+                          data = happiness_train)
+summary(happiness_selection)
+```
+## step-wise (Backward)
+
+```{r}
+happiness_backward <- step(object = happiness_all,
+                          direction = "backward")
+summary(happiness_backward)
+```
+
+
+## Membandingkan Model
+
+Kita telah membuat beberapa model diatas, oleh karena itu pada tahap kali ini kita akan coba membandingkan ketiga model tersebut dengan tujuan untuk mengambil model yang terbaik. Ada dua pembandingan yang dilakukan pada projek ini yaitu:
+
+- Berdasarkan Goodness of Fit
+- Berdasarkan nilai  Root Mean Squared Error (RMSE)
+
+### Goodness of Fit
+
+Tujuan: untuk menentukan seberapa baik model dalam menjelaskan variansi dari target variabel.
+
+Bandingkan nilai R-Squared dari model-model yang telah dibuat
+
+```{r}
+summary(happiness_all)$adj.r.squared
+summary(happiness_selection)$adj.r.squared
+summary(happiness_backward)$adj.r.squared
+```
+💡  Kesimpulan: Berdasarkan nilai R-Squared, dapat diambil kesimpulan bahwa model terbaik yang merepresentasikan data yang kita gunakan adalah model **happiness_backward** yaitu sebesar 0.7532092 atau 75.32%.
+
+## RMSE
+
+Tujuan : Mengukur sejauh mana perbedaan antara nilai-nilai yang diobservasi dan nilai-nilai yang diprediksi oleh model regresi.
+
+1. Lakukan prediksi dari model yang telah dibuat terhadap *Data Train* yang kita miliki:
+
+```{r}
+happiness_train$predict_all <- predict(object = happiness_all, newdata = happiness_train)
+happiness_train$predict_selection <- predict(object = happiness_selection, newdata = happiness_train)
+happiness_train$predict_backward <- predict(object = happiness_backward, newdata = happiness_train)
+head(happiness_train)
+
+```
+
+2. Lakukan perhitungan RMSE menggunakan fungsi `RMSE()` dari package `MLmetrics`:
+
+```{r}
+#RMSE for happiness_all
+RMSE(y_pred = happiness_train$predict_all,
+     y_true = happiness_train$Score)
+#RMSE FOR happiness_selection
+RMSE(y_pred = happiness_train$predict_selection,
+     y_true = happiness_train$Score)
+#RMSE for Happiness_backward
+RMSE(y_pred = happiness_train$predict_backward,
+     y_true = happiness_train$Score)
+```
+
+💡 Kesimpulan: Dari hasil perhitungan RMSE diatas, dapat dilihat bahwa model dengan seluruh prediktor `(happiness_all)` dengan nilai RMSE sebesar 0.5354361 merupakan paling kecil dibandingkan dengan kedua model lainnya. Oleh sebab itu, meskipun nilai Goodness of Fit model ini lebih kecil dibandingkan dengan model `happiness_backward`, kita akan menganggap model ini sebagai model terbaik karena dalam kasus ini nilai error lebih dikonsiderasikan dibandingkan dengan nilai Goodness of Fit dari model. Oleh sebab itu, model ini akan digunakan sebagai final model untuk melakukan prediksi terhadap *data test* untuk melihat kondisi apakah model final kita *overfit* atau *underfit*.
+
+```{r}
+happiness_test$predict_score <- predict(object = happiness_all, newdata = happiness_test)
+#RMSE
+RMSE(y_pred = happiness_test$predict_score,
+    y_true = happiness_test$Score)
+```
+
+Kesimpulan: Berdasarkan hasil RMSE antara *data train* yaitu 0.5354361  dan pada *data test* yaitu 0.4961612, perbedaannya cukup kecil dan keduanya memiliki nilai yang rendah. Ini menunjukkan bahwa model yang telah dibuat relatif baik dalam memprediksi data train maupun data test. Sehingga dapat diambil kesimpulan bahwa model `happiness_all` optimum.
+
+# Model Interpretation
+
+```{r}
+summary(happiness_all)
+```
+**Interpretation**:
+
+$$Score = 1.89423+  0.92691*GDP.per.capita+ 1.01779*Social.support +\\ 
+          0.90900*Healthy.life.expectancy+ 1.57301*Freedom.to.make.life.choices + \\
+\\0.80114* Generosity+ 0.07922 * Perceptions.of.corruption$$
+
+- `Intercept (Intersep)`: Estimasi intercept adalah 1.89423. Ini mengindikasikan bahwa jika semua variabel independen diatur ke nilai nol, prediksi Happiness Index akan memiliki nilai sekitar 1.89423. Dalam konteks ini, intercept mewakili pengaruh faktor-faktor lain yang tidak termasuk dalam model terhadap Happiness Index.
+
+- `GDP per capita (PDB per kapita)`: Estimasi koefisien untuk variabel GDP per capita adalah 0.92691. Ini berarti bahwa setiap peningkatan satu unit dalam GDP per capita akan menyebabkan peningkatan sekitar 0.92691 dalam prediksi Happiness Index, dengan asumsi variabel lain tetap konstan.
+
+- `Social support (Dukungan sosial)`: Estimasi koefisien untuk variabel social support adalah 1.01779. Artinya, setiap peningkatan satu unit dalam tingkat dukungan sosial akan berkontribusi sekitar 1.01779 dalam meningkatkan prediksi Happiness Index, dengan asumsi variabel lain tetap konstan.
+
+- `Healthy life expectancy (Harapan hidup sehat)`: Estimasi koefisien untuk variabel healthy life expectancy adalah 0.90900. Ini menunjukkan bahwa setiap peningkatan satu unit dalam harapan hidup sehat akan berdampak sekitar 0.90900 dalam meningkatkan prediksi Happiness Index, dengan asumsi variabel lain tetap konstan.
+
+- `Freedom to make life choices (Kebebasan dalam membuat pilihan hidup)`: Estimasi koefisien untuk variabel freedom to make life choices adalah 1.57301. Ini berarti bahwa setiap peningkatan satu unit dalam tingkat kebebasan dalam membuat pilihan hidup akan berdampak sekitar 1.57301 dalam meningkatkan prediksi Happiness Index, dengan asumsi variabel lain tetap konstan.
+
+- `Generosity (Kegenerosan)`: Estimasi koefisien untuk variabel generosity adalah 0.80114. Namun, karena koefisien ini tidak signifikan secara statistik (p-value > 0.05), kita tidak dapat membuat kesimpulan yang kuat tentang pengaruh variabel ini terhadap prediksi Happiness Index.
+
+- `Perceptions of corruption (Persepsi tentang korupsi)`: Estimasi koefisien untuk variabel perceptions of corruption adalah 0.07922. Karena koefisien ini juga tidak signifikan secara statistik (p-value > 0.05), kita tidak dapat menyimpulkan adanya pengaruh yang kuat dari variabel ini terhadap prediksi Happiness Index.
+
+# Asumsi Linear Regression
+
+Sebagai salah satu model statistik, linear regression adalah model yang ketat asumsi. Berikut beberapa asumsi yang harus dicek untuk memastikan apakah model yang kita buat dianggap sebagai **Best Linear Unbiased Estimator (BLUE) model**, yaitu model yang dapat memprediksi data baru secara konsisten.
+
+Asumsi model linear regression:
+
+1. Linearity
+2. Normality of Residuals
+3. Homoscedasticity of Residuals
+4. No Multicollinearity
+
+## 1. Linearity
+
+```{r}
+plot(happiness_all, which = 1)
+```
+
+💡 Kesimpulan: Nilai residual  tersebar secara acak diantara -0.5 dan 0.5, artinya model yang kita miliki memenuhi asumsi linieriats.
+
+## 2. Normality of Residuals 
+
+1. Visualisasi histogram residual menggunakan fungsi `hist()`
+
+```{r}
+hist(happiness_all$residuals)
+```
+
+2. Uji statistik dengan `shapiro.test()`
+
+Shapiro-Wilk hypothesis test:
+
+* H0: error berdistribusi normal
+* H1: error TIDAK berdistribusi normal
+
+H0 ditolak jika p-values < 0.05 (alpha)
+
+```{r}
+shapiro.test(happiness_all$residuals)
+```
+
+💡 Kesimpulan: p-value = 0.06273 > 0.05, artinya residual data berdistribusi normal.
+
+3. Membuat plot plot
+
+```{r}
+plot(happiness_all, which = 2)
+```
+Berdasarkan pada plot diatas, nilai residual dapat dikatakn berdistribusi normal sebab titik data terdapat pada strip garis.
+
+## 3. Homoscedasticity of Residuals
+
+Diharapkan error yang dihasilkan oleh model menyebar secara acak atau dengan **variasi konstan**. Apabila divisualisasikan maka error tidak berpola. Kondisi ini disebut juga sebagai **homoscedasticity**. 
+
+1. Visualisasi scatter plot: `fitted.values` vs `residuals`
+
+```{r}
+plot(x = happiness_all$fitted.values,
+     y = happiness_all$residuals)
+abline(h = 0, col = "red")
+```
+
+Berdasarkan hasil plot diatas, dapat diambil kesimpulan bahwa terjadi **homoscedasticity** pada data sebab titik nilai residual dan fitted.value dari model tidak menunjukkan pola tertentu. Untuk lebih membuktikan asumsi ini maka akan dilakukan `bptest()` dari library `lmtest` sebagai berikut:
+
+Breusch-Pagan hypothesis test:
+
+* H0: error menyebar konstan atau homoscedasticity
+* H1: error menyebar TIDAK konstan atau heteroscedasticity
+
+tolak H0 jika nilai p-value < 0.05 (alpha)
+
+```{r message= FALSE, warning=FALSE}
+library(lmtest)
+bptest(happiness_all)
+```
+
+💡 Kesimpulan: p-value = 0.06183 > 0.05 artinya error menyebar konstan atau homoscedasticity. 
+
+## 4. No multicolinearity
+
+Uji VIF (Variance Inflation Factor) dengan fungsi `vif()` dari package `car`:
+
+* nilai VIF > 10: terjadi multicollinearity pada model
+* **nilai VIF < 10**: tidak terjadi multicollinearity pada model
+
+```{r message= FALSE, warning=FALSE}
+library(car)
+vif(happiness_all)
+```
+
+💡 Kesimpulan: Berdasarkan hasil uji VIF diatas, tidak terdapat satupun variabel prediktor yang memiliki nilai VIF > 10, artinya antara satu variabel independen dengan yang lainnya tidak terdapat korelasi yang kuat.
+
+# Kesimpulan
+
+- Variabel prediktor yang paling baik dalam menjelaskan distribusi dari score happiness index adalah GDP per Kapita, Social Support, life expectancy, freedom to make choices, Generosity, dan percepstion of corruption. Meskipun secara statistik Generosity, dan percepstion of corruption tidak menunjukkan pengaruh yang signifikan terhadap score, namun variabel ini tetap menjadi salah satu konsiderasi dalam menjelaskan score dari happiness index di setiap negara. 
+
+- Nilai R-Squared dari model yang dimiliki cukup tinggi dengan 75.11% dari variabel bisa menjelaskan variasi dari score happiness index.
+
+- Nilai RMSE pada *data train* adalah sebesar 0.5354361  dan pada *data test* yaitu 0.4961612, hal ini menunjukkan angka serta range yang cukup kecil menandakan bahwa model kita optimum.
+
+
